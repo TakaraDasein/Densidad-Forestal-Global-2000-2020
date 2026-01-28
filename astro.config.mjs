@@ -7,7 +7,18 @@ export default defineConfig({
   ],
   vite: {
     ssr: {
-      noExternal: ['d3', 'd3-geo', 'd3-array', 'd3-scale', 'd3-interpolate']
+      noExternal: [
+        'd3',
+        'd3-geo',
+        'd3-array',
+        'd3-scale',
+        'd3-interpolate',
+        'd3-scale-chromatic',
+        'd3-selection',
+        'd3-ease',
+        'd3-drag',
+        'd3-transition'
+      ]
     }
   }
 });
