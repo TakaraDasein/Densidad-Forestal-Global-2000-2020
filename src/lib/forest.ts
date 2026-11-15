@@ -4,7 +4,6 @@ export interface CountrySeries {
   iso3: string
   numeric: string | null
   name: string
-  name_en: string
   values: (number | null)[]
 }
 
@@ -16,11 +15,12 @@ export interface RegionSeries {
 
 export interface ForestDataset {
   meta: {
-    indicator: string
     description: string
     source: string
     lastUpdated: string | null
     years: number[]
+    referenceYears: number[]
+    projectedYears: number[]
   }
   regions: RegionSeries[]
   countries: Record<string, CountrySeries>
@@ -32,6 +32,11 @@ export const forest = forestJson as ForestDataset
 export const YEARS = forest.meta.years
 export const FIRST_YEAR = YEARS[0]
 export const LAST_YEAR = YEARS[YEARS.length - 1]
+export const REFERENCE_YEARS = forest.meta.referenceYears
+export const PROJECTED_YEARS = forest.meta.projectedYears
+/** Último año con datos oficiales (no proyectados) */
+export const LAST_OFFICIAL_YEAR = REFERENCE_YEARS[REFERENCE_YEARS.length - 1]
+export const isProjected = (y: number) => PROJECTED_YEARS.includes(y)
 export const COUNTRIES = Object.values(forest.countries)
 export const COUNTRY_BY_NUMERIC = new Map(
   COUNTRIES.filter(c => c.numeric).map(c => [c.numeric as string, c]),

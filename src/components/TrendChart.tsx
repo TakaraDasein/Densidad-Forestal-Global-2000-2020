@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { scaleLinear, line, extent } from "d3"
-import { YEARS, fmtPct } from "@/lib/forest"
+import { LAST_OFFICIAL_YEAR, REFERENCE_YEARS, YEARS, fmtPct, isProjected } from "@/lib/forest"
 
 export interface TrendSeries {
   label: string
@@ -38,7 +38,15 @@ export default function TrendChart({ series, year, baseYear, height = 150 }: Tre
       .defined(v => v !== null)
       .x((_, i) => x(YEARS[i]))
       .y(v => y(v as number))
-    return { x, y, paths: series.map(s => gen(s.values) ?? "") }
+    const cut = YEARS.indexOf(LAST_OFFICIAL_YEAR)
+    return {
+      x,
+      y,
+      paths: series.map(s => ({
+        official: gen(s.values.map((v, i) => (i <= cut ? v : null))) ?? "",
+        projected: gen(s.values.map((v, i) => (i >= cut ? v : null))) ?? "",
+      })),
+    }
   }, [series, H])
 
   const yi = YEARS.indexOf(year)
@@ -86,16 +94,44 @@ export default function TrendChart({ series, year, baseYear, height = 150 }: Tre
           />
         )}
         <line x1={x(YEARS[shownIdx])} x2={x(YEARS[shownIdx])} y1={M.top} y2={H - M.bottom} stroke="rgba(250,204,21,0.6)" />
+        {x(LAST_OFFICIAL_YEAR) < W - M.right && (
+          <rect
+            x={x(LAST_OFFICIAL_YEAR)}
+            y={M.top}
+            width={W - M.right - x(LAST_OFFICIAL_YEAR)}
+            height={H - M.bottom - M.top}
+            fill="rgba(255,255,255,0.05)"
+          >
+            <title>Proyección (no es dato oficial)</title>
+          </rect>
+        )}
         {series.map((s, i) => (
-          <path
-            key={s.label}
-            d={paths[i]}
-            fill="none"
-            stroke={s.color}
-            strokeWidth={i === 0 ? 2.2 : 1.5}
-            strokeDasharray={s.dashed ? "4 3" : undefined}
-            strokeLinejoin="round"
-          />
+          <g key={s.label}>
+            <path
+              d={paths[i].official}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={i === 0 ? 2.2 : 1.5}
+              strokeDasharray={s.dashed ? "4 3" : undefined}
+              strokeLinejoin="round"
+            />
+            <path
+              d={paths[i].projected}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={i === 0 ? 2.2 : 1.5}
+              strokeDasharray="1.5 2.5"
+              strokeLinecap="round"
+              opacity={0.8}
+            />
+            {i === 0 &&
+              REFERENCE_YEARS.map(ry => {
+                const v = s.values[YEARS.indexOf(ry)]
+                return v === null || v === undefined ? null : (
+                  <circle key={ry} cx={x(ry)} cy={y(v)} r={1.8} fill={s.color} />
+                )
+              })}
+          </g>
         ))}
         {series.map(s => {
           const v = s.values[shownIdx]
@@ -105,7 +141,10 @@ export default function TrendChart({ series, year, baseYear, height = 150 }: Tre
         })}
       </svg>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-white/70 mt-1">
-        <span className="text-yellow-300/90 font-medium">{YEARS[shownIdx]}</span>
+        <span className="text-yellow-300/90 font-medium">
+          {YEARS[shownIdx]}
+          {isProjected(YEARS[shownIdx]) && <span className="text-white/50 font-normal"> (proyección)</span>}
+        </span>
         {series.map(s => (
           <span key={s.label} className="flex items-center gap-1">
             <span className="inline-block w-3 h-0.5" style={{ background: s.color }} />

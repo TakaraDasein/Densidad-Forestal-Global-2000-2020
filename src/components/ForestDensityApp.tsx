@@ -7,8 +7,11 @@ import {
   COUNTRIES,
   COVER_STOPS,
   FIRST_YEAR,
+  LAST_OFFICIAL_YEAR,
   LAST_YEAR,
   NO_DATA_COLOR,
+  REFERENCE_YEARS,
+  isProjected,
   WORLD,
   YEARS,
   changeBetween,
@@ -68,6 +71,7 @@ function Legend({ mode, year, baseYear }: { mode: ViewMode; year: number; baseYe
         {mode === "cover"
           ? `Cobertura forestal ${year} (% del territorio)`
           : `Cambio ${baseYear}→${year} (puntos porcentuales)`}
+        {isProjected(year) && <span className="text-amber-300"> · proyección</span>}
       </div>
       <div className="h-2.5 rounded-full" style={{ background: gradient }} />
       <div className="relative h-4 text-[10px] text-white/60 mt-0.5">
@@ -118,7 +122,7 @@ function RankList({
 }
 
 export default function ForestDensityApp() {
-  const [year, setYear] = useState(LAST_YEAR)
+  const [year, setYear] = useState(LAST_OFFICIAL_YEAR)
   const [baseYear, setBaseYear] = useState(FIRST_YEAR)
   const [mode, setMode] = useState<ViewMode>("cover")
   const [basemap, setBasemap] = useState<Basemap>("osm")
@@ -203,7 +207,10 @@ export default function ForestDensityApp() {
           className="pointer-events-none absolute z-30 rounded-lg bg-black/80 border border-white/10 px-2.5 py-1.5 text-xs shadow-lg"
           style={{ left: hover.x + 14, top: hover.y + 14 }}
         >
-          <div className="font-medium">{hover.name}</div>
+          <div className="font-medium">
+            {hover.name}
+            {isProjected(year) && <span className="text-amber-300/80 font-normal"> · proyección {year}</span>}
+          </div>
           <div className="flex items-center gap-1.5 text-white/80 tabular-nums">
             <span
               className="inline-block w-2.5 h-2.5 rounded-sm"
@@ -224,7 +231,7 @@ export default function ForestDensityApp() {
           <h1 className="text-lg sm:text-xl font-bold leading-tight">Densidad Forestal Global</h1>
           <p className="text-xs text-white/60">
             Superficie forestal por país · {FIRST_YEAR}–{LAST_YEAR}
-            <span className="hidden sm:inline"> · FAO / Banco Mundial</span>
+            <span className="hidden sm:inline"> · FAO FRA 2025</span>
           </p>
         </div>
       </header>
@@ -252,7 +259,10 @@ export default function ForestDensityApp() {
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-white/5 p-2">
-                <div className="text-[10px] text-white/50">Cobertura {year}</div>
+                <div className="text-[10px] text-white/50">
+                  Cobertura {year}
+                  {isProjected(year) && " (proy.)"}
+                </div>
                 <div className="text-lg font-bold tabular-nums">{fmtPct(valueAt(selected, year))}</div>
               </div>
               <div className="rounded-lg bg-white/5 p-2">
@@ -326,7 +336,10 @@ export default function ForestDensityApp() {
             </button>
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-lg bg-white/5 p-2">
-                <div className="text-[10px] text-white/50">Mundo {year}</div>
+                <div className="text-[10px] text-white/50">
+                  Mundo {year}
+                  {isProjected(year) && " (proy.)"}
+                </div>
                 <div className="text-lg font-bold tabular-nums">{fmtPct(valueAt(WORLD, year))}</div>
               </div>
               <div className="rounded-lg bg-white/5 p-2">
@@ -406,7 +419,16 @@ export default function ForestDensityApp() {
             >
               {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
             </button>
-            <div className="text-3xl font-bold tabular-nums w-[4.5rem]">{year}</div>
+            <div className="w-[4.5rem] leading-none">
+              <div className="text-3xl font-bold tabular-nums">{year}</div>
+              {isProjected(year) ? (
+                <div className="text-[10px] uppercase tracking-wide text-amber-300 mt-0.5">Proyección</div>
+              ) : !REFERENCE_YEARS.includes(year) ? (
+                <div className="text-[10px] text-white/45 mt-0.5">interpolado</div>
+              ) : (
+                <div className="text-[10px] text-emerald-300/80 mt-0.5">dato FAO</div>
+              )}
+            </div>
             <div className="flex-1 min-w-[180px]">
               <input
                 type="range"
@@ -426,7 +448,10 @@ export default function ForestDensityApp() {
                   <button
                     key={y}
                     onClick={() => setYear(y)}
-                    className={`hover:text-white ${y % 10 === 0 || y === LAST_YEAR ? "" : "hidden sm:inline"}`}
+                    className={`hover:text-white ${y % 10 === 0 || y === LAST_YEAR ? "" : "hidden sm:inline"} ${
+                      isProjected(y) ? "text-amber-300/80" : ""
+                    }`}
+                    title={isProjected(y) ? "Proyección" : undefined}
                   >
                     {y}
                   </button>
@@ -485,14 +510,22 @@ export default function ForestDensityApp() {
               </button>
             </div>
             <p>
-              <strong>Indicador:</strong> superficie forestal como porcentaje de la superficie terrestre de cada país
-              (Banco Mundial, <code>AG.LND.FRST.ZS</code>), serie anual {FIRST_YEAR}–{LAST_YEAR} para{" "}
-              {COUNTRIES.length} países y territorios. Actualización de la fuente: {forest.meta.lastUpdated}.
+              <strong>Indicador:</strong> superficie forestal como porcentaje de la superficie terrestre de cada país,
+              serie anual {FIRST_YEAR}–{LAST_YEAR} para {COUNTRIES.length} países y territorios.
             </p>
             <p>
-              Los valores proceden de la <strong>Evaluación de los Recursos Forestales Mundiales (FRA) de la FAO</strong>.
-              La FAO reporta cifras para años de referencia (1990, 2000, 2010, 2015, 2020) y los años intermedios se
-              interpolan; los últimos años pueden ser extrapolaciones.
+              <strong>Fuente:</strong> FAO, <em>Evaluación de los Recursos Forestales Mundiales 2025</em> (FRA 2025),
+              datos de la plataforma FRA descargados el {forest.meta.lastUpdated}. Superficie terrestre: Banco Mundial
+              (WDI).
+            </p>
+            <p>
+              La FAO publica cifras para los años de referencia {REFERENCE_YEARS.join(", ")}. Los años intermedios se
+              interpolan linealmente.{" "}
+              <span className="text-amber-300">
+                {LAST_YEAR} es una proyección
+              </span>{" "}
+              que prolonga la tendencia {REFERENCE_YEARS[REFERENCE_YEARS.length - 2]}–{LAST_OFFICIAL_YEAR} de cada país:
+              todavía no existen datos oficiales para ese año.
             </p>
             <p>
               <strong>Modo «Cambio»:</strong> diferencia en puntos porcentuales de cobertura entre el año base y el año
