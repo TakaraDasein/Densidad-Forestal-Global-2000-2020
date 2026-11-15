@@ -31,7 +31,6 @@ Notas sobre los datos:
 
 - Globo 3D con [MapLibre GL JS](https://maplibre.org/); mapa base opcional de
   [OpenStreetMap](https://www.openstreetmap.org/copyright) en versión oscura (desactivado por defecto).
-- Los países se rellenan con un patrón de panal (celdas hexagonales) recortado por su contorno.
 - Navegación por temas (Bosques, Biodiversidad, Clima) y línea de tiempo con animación.
 - Al pasar el cursor sobre un país aparece su resumen completo: valor, cambio, superficie de bosque ganada o
   perdida y los ocho indicadores.
