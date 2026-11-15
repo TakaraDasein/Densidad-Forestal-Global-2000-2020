@@ -4,22 +4,13 @@ import "maplibre-gl/dist/maplibre-gl.css"
 import { feature } from "topojson-client"
 import { geoBounds, geoCentroid } from "d3"
 import type { Feature, FeatureCollection, Geometry } from "geojson"
-import {
-  CHANGE_STOPS,
-  COUNTRY_BY_NUMERIC,
-  COVER_STOPS,
-  NO_DATA_COLOR,
-  YEARS,
-  forest,
-  type ViewMode,
-} from "@/lib/forest"
+import { COUNTRY_BY_NUMERIC, COUNTRIES, NO_DATA_COLOR } from "@/lib/indicators"
 
 export type Basemap = "osm" | "none"
 
 interface GlobeVizProps {
-  year: number
-  baseYear: number
-  mode: ViewMode
+  /** Color de cada país (iso3 → color). Los países ausentes se pintan como «sin datos». */
+  colors: Record<string, string>
   basemap: Basemap
   selectedIso: string | null
   onSelect: (iso3: string | null) => void
@@ -32,29 +23,15 @@ const LINE = "countries-line"
 const HOVER = "countries-hover"
 const SELECTED = "countries-selected"
 
-const key = (y: number) => `v${y}`
-
-function fillExpression(mode: ViewMode, year: number, baseYear: number): ExpressionSpecification {
-  if (mode === "cover") {
-    return [
-      "case",
-      ["has", key(year)],
-      ["interpolate", ["linear"], ["get", key(year)], ...COVER_STOPS.flat()],
-      NO_DATA_COLOR,
-    ] as ExpressionSpecification
-  }
-  return [
-    "case",
-    ["all", ["has", key(year)], ["has", key(baseYear)]],
-    [
-      "interpolate",
-      ["linear"],
-      ["-", ["get", key(year)], ["get", key(baseYear)]],
-      ...CHANGE_STOPS.flat(),
-    ],
-    NO_DATA_COLOR,
-  ] as ExpressionSpecification
+function fillExpression(colors: Record<string, string>): ExpressionSpecification | string {
+  const entries = Object.entries(colors)
+  if (!entries.length) return NO_DATA_COLOR
+  return ["match", ["get", "iso3"], ...entries.flat(), NO_DATA_COLOR] as unknown as ExpressionSpecification
 }
+
+// Con mapa base, el relleno deja ver un poco las teselas
+const fillOpacity = (basemap: Basemap): ExpressionSpecification =>
+  ["case", ["boolean", ["feature-state", "hover"], false], 1, basemap === "osm" ? 0.8 : 0.94] as ExpressionSpecification
 
 function buildStyle(basemap: Basemap): StyleSpecification {
   return {
@@ -87,9 +64,11 @@ function buildStyle(basemap: Basemap): StyleSpecification {
         source: "osm",
         layout: { visibility: basemap === "osm" ? "visible" : "none" },
         paint: {
-          "raster-saturation": -0.35,
-          "raster-brightness-max": 0.85,
-          "raster-contrast": 0.05,
+          // Versión oscura y poco saturada de las teselas estándar de OSM
+          "raster-saturation": -0.6,
+          "raster-contrast": 0.3,
+          "raster-brightness-min": 0,
+          "raster-brightness-max": 0.3,
         },
       },
     ],
@@ -119,20 +98,18 @@ function unwrapGeometry(g: Geometry): Geometry {
 async function loadCountries(): Promise<FeatureCollection<Geometry>> {
   const topo = await fetch("/data/countries-50m.json").then(r => r.json())
   const fc = feature(topo, topo.objects.countries) as unknown as FeatureCollection<Geometry>
-  const kosovo = forest.countries.XKX
   // La Antártida no tiene datos y su anillo polar genera artefactos en el globo
-  fc.features = fc.features.filter(f => String(f.id) !== "010").map((f: Feature<Geometry>, i: number) => {
-    const name = (f.properties as any)?.name as string
-    const c = (f.id ? COUNTRY_BY_NUMERIC.get(String(f.id)) : undefined) ?? (name === "Kosovo" ? kosovo : undefined)
-    const props: Record<string, unknown> = { iso3: c?.iso3 ?? `geo-${i}`, name: c?.name ?? name, hasData: !!c }
-    if (c) {
-      YEARS.forEach((y, k) => {
-        const v = c.values[k]
-        if (v !== null) props[key(y)] = v
-      })
-    }
-    return { type: "Feature", geometry: unwrapGeometry(f.geometry), properties: props }
-  })
+  fc.features = fc.features
+    .filter(f => String(f.id) !== "010")
+    .map((f: Feature<Geometry>, i: number) => {
+      const name = (f.properties as any)?.name as string
+      const c = (f.id ? COUNTRY_BY_NUMERIC.get(String(f.id)) : undefined) ?? (name === "Kosovo" ? COUNTRIES.XKX : undefined)
+      return {
+        type: "Feature",
+        geometry: unwrapGeometry(f.geometry),
+        properties: { iso3: c?.iso3 ?? `geo-${i}`, name: c?.name ?? name, known: !!c },
+      }
+    })
   return fc
 }
 
@@ -142,13 +119,13 @@ const fitZoom = (el: HTMLElement) => {
   return Math.max(1, Math.min(3, Math.log2((size * 0.36 * 2 * Math.PI) / 512)))
 }
 
-const GlobeViz = ({ year, baseYear, mode, basemap, selectedIso, onSelect, onHover }: GlobeVizProps) => {
+const GlobeViz = ({ colors, basemap, selectedIso, onSelect, onHover }: GlobeVizProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const featuresRef = useRef<Map<string, Feature<Geometry>>>(new Map())
   const [ready, setReady] = useState(false)
-  const propsRef = useRef({ year, baseYear, mode, selectedIso, onSelect, onHover })
-  propsRef.current = { year, baseYear, mode, selectedIso, onSelect, onHover }
+  const propsRef = useRef({ colors, basemap, selectedIso, onSelect, onHover })
+  propsRef.current = { colors, basemap, selectedIso, onSelect, onHover }
 
   const userInteracting = useRef(false)
   const lastInteraction = useRef(0)
@@ -176,14 +153,13 @@ const GlobeViz = ({ year, baseYear, mode, basemap, selectedIso, onSelect, onHove
       const fc = await loadCountries()
       fc.features.forEach(f => featuresRef.current.set((f.properties as any).iso3, f))
       map.addSource(SOURCE, { type: "geojson", data: fc, promoteId: "iso3" })
-      const { mode, year, baseYear } = propsRef.current
       map.addLayer({
         id: FILL,
         type: "fill",
         source: SOURCE,
         paint: {
-          "fill-color": fillExpression(mode, year, baseYear),
-          "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.95, 0.78],
+          "fill-color": fillExpression(propsRef.current.colors),
+          "fill-opacity": fillOpacity(propsRef.current.basemap),
         },
       })
       map.addLayer({
@@ -220,9 +196,9 @@ const GlobeViz = ({ year, baseYear, mode, basemap, selectedIso, onSelect, onHove
         hoveredId = id
         map.setFeatureState({ source: SOURCE, id }, { hover: true })
       }
-      map.getCanvas().style.cursor = f.properties?.hasData ? "pointer" : "default"
+      map.getCanvas().style.cursor = f.properties?.known ? "pointer" : "default"
       propsRef.current.onHover?.({
-        iso3: f.properties?.hasData ? id : null,
+        iso3: f.properties?.known ? id : null,
         name: f.properties?.name,
         x: e.point.x,
         y: e.point.y,
@@ -236,7 +212,7 @@ const GlobeViz = ({ year, baseYear, mode, basemap, selectedIso, onSelect, onHove
     })
     map.on("click", e => {
       const f = map.queryRenderedFeatures(e.point, { layers: [FILL] })[0]
-      const iso = f?.properties?.hasData ? String(f.id) : null
+      const iso = f?.properties?.known ? String(f.id) : null
       const current = propsRef.current.selectedIso
       propsRef.current.onSelect(iso && iso !== current ? iso : null)
     })
@@ -285,18 +261,19 @@ const GlobeViz = ({ year, baseYear, mode, basemap, selectedIso, onSelect, onHove
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Colores según año / modo
+  // Colores según indicador / año / modo
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
-    map.setPaintProperty(FILL, "fill-color", fillExpression(mode, year, baseYear))
-  }, [ready, mode, year, baseYear])
+    map.setPaintProperty(FILL, "fill-color", fillExpression(colors))
+  }, [ready, colors])
 
   // Mapa base
   useEffect(() => {
     const map = mapRef.current
     if (!map || !map.getLayer("osm")) return
     map.setLayoutProperty("osm", "visibility", basemap === "osm" ? "visible" : "none")
+    if (map.getLayer(FILL)) map.setPaintProperty(FILL, "fill-opacity", fillOpacity(basemap))
   }, [ready, basemap])
 
   // Selección: resalta y vuela al país
