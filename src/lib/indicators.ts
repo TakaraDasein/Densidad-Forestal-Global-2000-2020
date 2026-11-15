@@ -18,6 +18,9 @@ interface IndicatorData {
   world: Series | null
   regions?: { code: string; name: string; values: Series }[]
   values: Record<string, Series>
+  /** Solo cobertura forestal: superficie de bosque en miles de hectáreas */
+  area?: Record<string, Series>
+  worldArea?: Series
 }
 
 export type Stops = [number, string][]
@@ -344,3 +347,17 @@ export const fmtChange = (ind: Indicator, v: number | null, decimals = ind.decim
 
 export const fmtFor = (ind: Indicator, mode: ViewMode, v: number | null) =>
   mode === "cover" ? fmtValue(ind, v) : fmtChange(ind, v)
+
+/** Superficie en miles de ha → texto («486,1 M ha», «35 mil ha») */
+export const fmtArea = (kha: number | null, signed = false) => {
+  if (kha === null) return "—"
+  const abs = Math.abs(kha)
+  const sign = signed ? (kha > 0 ? "+" : kha < 0 ? "−" : "") : ""
+  if (abs >= 1000) return `${sign}${num(abs / 1000, abs >= 100000 ? 0 : 1)} M ha`
+  if (abs >= 1) return `${sign}${num(abs, abs >= 100 ? 0 : 1)} mil ha`
+  return `${abs === 0 ? "" : sign}${num(abs * 1000, 0)} ha`
+}
+
+/** Año que se muestra de cada indicador en la ficha de un país, dado el año activo */
+export const fichaYear = (i: Indicator, active: Indicator, year: number) =>
+  i.id === active.id ? year : i.yearLabels || active.yearLabels ? defaultYear(i) : nearestYear(i, Math.min(year, defaultYear(i)))

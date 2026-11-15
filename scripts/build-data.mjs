@@ -103,6 +103,7 @@ const indicators = []
   }
 
   const values = {}
+  const area = {} // superficie forestal absoluta (miles de ha), para mostrar la cantidad ganada o perdida
   const sums = new Map()
   const add = (key, series, landKm2) => {
     if (!sums.has(key)) sums.set(key, { forest: years.map(() => 0), land: 0 })
@@ -116,6 +117,7 @@ const indicators = []
     const series = annual(byYear)
     if (!series || !landKm2) continue
     values[iso3] = series.map(v => round(v === null ? null : Math.min(100, (v * 1000) / landKm2), 2))
+    area[iso3] = series.map(v => round(v, 1))
     add("WLD", series, landKm2)
     if (regionOf.get(iso3)) add(regionOf.get(iso3), series, landKm2)
   }
@@ -138,6 +140,8 @@ const indicators = []
     world: agg("WLD"),
     regions: REGIONS.map(([code, key, name]) => ({ code, name, values: agg(key) })),
     values,
+    area,
+    worldArea: sums.get("WLD").forest.map(v => round(v, 0)),
   })
 }
 

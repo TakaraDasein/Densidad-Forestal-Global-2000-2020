@@ -14,19 +14,20 @@ import {
   colorFor,
   defaultYear,
   displayValue,
+  fichaYear,
+  fmtArea,
   fmtChange,
   fmtFor,
   fmtValue,
   isProjected,
   median,
-  nearestYear,
   stopsFor,
   valueAt,
   yearLabel,
   type Indicator,
   type ViewMode,
 } from "@/lib/indicators"
-import { ChevronDown, Info, Layers, Pause, Play, TrendingDown, TrendingUp, X } from "lucide-react"
+import { Bird, ChevronDown, Info, Layers, Pause, Play, ThermometerSun, TrendingDown, TrendingUp, Trees, X } from "lucide-react"
 
 function Segmented<T extends string>({
   value,
@@ -131,6 +132,108 @@ function RankList({
   )
 }
 
+const GROUP_ICONS: Record<string, React.ReactNode> = {
+  "Bosques y ecosistemas": <Trees className="h-4 w-4" />,
+  Biodiversidad: <Bird className="h-4 w-4" />,
+  Clima: <ThermometerSun className="h-4 w-4" />,
+}
+const GROUP_SHORT: Record<string, string> = { "Bosques y ecosistemas": "Bosques" }
+
+/** Superficie de bosque del país y cantidad ganada o perdida desde un año base */
+function forestAreaInfo(ind: Indicator, iso3: string, from: number, year: number) {
+  const s = ind.area?.[iso3]
+  if (!s) return null
+  const now = valueAt(ind, s, year)
+  const delta = changeBetween(ind, s, from, year)
+  return now === null ? null : { now, delta }
+}
+
+function AreaLine({ ind, iso3, from, year }: { ind: Indicator; iso3: string; from: number; year: number }) {
+  const a = forestAreaInfo(ind, iso3, from, year)
+  if (!a) return null
+  return (
+    <div className="text-[11px] text-white/70 leading-snug">
+      Bosque: <span className="text-white tabular-nums">{fmtArea(a.now)}</span>
+      {a.delta !== null && from !== year && (
+        <>
+          {" · "}
+          <span className={`tabular-nums ${a.delta < 0 ? "text-red-300" : a.delta > 0 ? "text-emerald-300" : ""}`}>
+            {a.delta < 0 ? "perdió " : a.delta > 0 ? "ganó " : "sin cambio "}
+            {a.delta !== 0 && fmtArea(Math.abs(a.delta))}
+          </span>{" "}
+          desde {yearLabel(ind, from)}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Filas con todos los indicadores de un país (ficha ambiental) */
+function FichaRows({
+  iso3,
+  active,
+  year,
+  onPick,
+  compact,
+}: {
+  iso3: string
+  active: Indicator
+  year: number
+  onPick?: (id: string) => void
+  compact?: boolean
+}) {
+  return (
+    <ul className={`text-xs ${compact ? "" : "divide-y divide-white/5"}`}>
+      {INDICATORS.map(i => {
+        const y = fichaYear(i, active, year)
+        const s = i.values[iso3]
+        const v = valueAt(i, s, y)
+        const d = changeBetween(i, s, i.years[0], y)
+        const row = (
+          <>
+            <span className="min-w-0">
+              <span className={`block truncate ${i.id === active.id ? "text-white font-medium" : "text-white/75"}`}>
+                {i.short}
+              </span>
+              {!compact && (
+                <span className="block text-[10px] text-white/40">
+                  {yearLabel(i, y)}
+                  {isProjected(i, y) && " · proyección"}
+                </span>
+              )}
+            </span>
+            <span className="text-right whitespace-nowrap tabular-nums">
+              <span className={compact ? "text-white" : "block text-white"}>{fmtValue(i, v)}</span>
+              {d !== null && y !== i.years[0] && (
+                <span className={`${compact ? "ml-1.5" : "block"} text-[10px] ${changeTone(i, d) || "text-white/40"}`}>
+                  {fmtChange(i, d)}
+                  {!compact && ` desde ${yearLabel(i, i.years[0]).slice(0, 4)}`}
+                </span>
+              )}
+            </span>
+          </>
+        )
+        return (
+          <li key={i.id}>
+            {onPick ? (
+              <button
+                onClick={() => onPick(i.id)}
+                className={`w-full flex items-center justify-between gap-2 py-1 px-1 -mx-1 rounded text-left hover:bg-white/10 ${
+                  i.id === active.id ? "bg-white/5" : ""
+                }`}
+              >
+                {row}
+              </button>
+            ) : (
+              <div className="flex items-baseline justify-between gap-3 py-[1px]">{row}</div>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 const Stat = ({ label, children }: { label: React.ReactNode; children: React.ReactNode }) => (
   <div className="rounded-lg bg-white/5 p-2 min-w-0">
     <div className="text-[10px] text-white/50 leading-tight">{label}</div>
@@ -231,7 +334,7 @@ export default function AtlasApp() {
   const rank = selectedIso ? summary.current.findIndex(c => c.iso3 === selectedIso) : -1
 
   const hoverSeries = hover?.iso3 ? ind.values[hover.iso3] : undefined
-  const hoverValue = displayValue(ind, mode, hoverSeries, baseYear, year)
+  const hoverChange = changeBetween(ind, hoverSeries, from, year)
 
   const startPlay = () => {
     if (yearIdx >= years.length - 1) setYear(mode === "change" ? years[years.indexOf(baseYear) + 1] ?? firstYear : firstYear)
@@ -262,58 +365,99 @@ export default function AtlasApp() {
 
       <GlobeViz colors={colors} basemap={basemap} selectedIso={selectedIso} onSelect={select} onHover={setHover} />
 
-      {/* Tooltip */}
+      {/* Tooltip: resumen completo del país */}
       {hover && (
         <div
-          className="pointer-events-none absolute z-30 rounded-lg bg-black/80 border border-white/10 px-2.5 py-1.5 text-xs shadow-lg max-w-[240px]"
-          style={{ left: hover.x + 14, top: hover.y + 14 }}
+          className="pointer-events-none absolute z-30 w-[270px] rounded-xl bg-[#060d18]/95 border border-white/15 px-3 py-2.5 text-xs shadow-xl"
+          style={{
+            left: hover.x + 16 + 270 > window.innerWidth ? Math.max(8, hover.x - 16 - 270) : hover.x + 16,
+            top: Math.max(8, Math.min(hover.y + 16, window.innerHeight - (hover.iso3 ? 375 : 80))),
+          }}
         >
-          <div className="font-medium">{hover.name}</div>
-          <div className="text-[10px] text-white/50">
-            {ind.short} · {mode === "change" ? `${yearLabel(ind, baseYear)} → ` : ""}
-            {yearLabel(ind, year)}
-            {isProjected(ind, year) && <span className="text-amber-300/80"> · proyección</span>}
-          </div>
-          <div className="flex items-center gap-1.5 text-white/90 tabular-nums">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-sm"
-              style={{ background: colorFor(ind, mode, hoverValue) }}
-            />
-            {hoverValue === null ? "Sin datos" : fmtFor(ind, mode, hoverValue)}
-          </div>
+          <div className="text-sm font-semibold leading-tight">{hover.name}</div>
+          {hover.iso3 ? (
+            <>
+              <div className="mt-1.5 rounded-lg bg-white/5 px-2 py-1.5">
+                <div className="text-[10px] text-white/50">
+                  {ind.short} · {yearLabel(ind, year)}
+                  {isProjected(ind, year) && <span className="text-amber-300/80"> · proyección</span>}
+                </div>
+                <div className="flex items-center gap-1.5 text-base font-bold tabular-nums">
+                  <span
+                    className="inline-block w-3 h-3 rounded-sm shrink-0"
+                    style={{ background: colorFor(ind, "cover", valueAt(ind, hoverSeries, year)) }}
+                  />
+                  {hoverSeries ? fmtValue(ind, valueAt(ind, hoverSeries, year)) : "Sin datos"}
+                </div>
+                {hoverSeries && from !== year && (
+                  <div className="text-[11px] text-white/70">
+                    Cambio desde {yearLabel(ind, from)}:{" "}
+                    <span className={`tabular-nums font-medium ${changeTone(ind, hoverChange) || "text-white"}`}>
+                      {fmtChange(ind, hoverChange)}
+                    </span>
+                  </div>
+                )}
+                <AreaLine ind={ind} iso3={hover.iso3} from={from} year={year} />
+              </div>
+              <div className="mt-2 text-[10px] uppercase tracking-wide text-white/40">Todos los indicadores</div>
+              <FichaRows iso3={hover.iso3} active={ind} year={year} compact />
+              <div className="mt-1.5 text-[10px] text-white/40">Clic para ver la evolución · cambios desde el inicio de cada serie</div>
+            </>
+          ) : (
+            <div className="text-white/60">Sin datos</div>
+          )}
         </div>
       )}
 
-      {/* Cabecera + selector de indicador */}
-      <header className="absolute top-3 left-3 z-20 w-[min(340px,calc(100vw-72px))]">
-        <div className="rounded-2xl bg-black/50 backdrop-blur-md border border-white/10 px-4 py-2.5">
-          <h1 className="text-lg font-bold leading-tight">Observatorio Ambiental Global</h1>
-          <p className="text-xs text-white/60">Bosques, biodiversidad y clima por país</p>
-          <label className="block mt-2">
-            <span className="sr-only">Indicador</span>
-            <select
-              value={indicatorId}
-              onChange={e => changeIndicator(e.target.value)}
-              className="w-full rounded-lg bg-emerald-500/15 border border-emerald-400/40 px-2 py-1.5 text-sm font-medium text-white"
-            >
+      {/* Columna superior: navegación por temas + panel */}
+      <div className="absolute z-20 top-3 left-3 right-3 bottom-[150px] sm:bottom-[100px] flex flex-col gap-2 pointer-events-none">
+        <header className="pointer-events-auto mr-12 sm:mr-14 rounded-2xl bg-black/50 backdrop-blur-md border border-white/10 px-3 sm:px-4 py-2.5 flex flex-col lg:flex-row lg:items-center gap-x-5 gap-y-2">
+          <div className="shrink-0">
+            <h1 className="text-base sm:text-lg font-bold leading-tight">Observatorio Ambiental Global</h1>
+            <p className="text-[11px] sm:text-xs text-white/60">Bosques, biodiversidad y clima por país</p>
+          </div>
+          <nav aria-label="Indicadores" className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-2">
+            <div role="tablist" aria-label="Tema" className="flex shrink-0 rounded-full bg-white/10 p-0.5 text-xs self-start">
               {GROUPS.map(g => (
-                <optgroup key={g} label={g} className="bg-gray-900">
-                  {INDICATORS.filter(i => i.group === g).map(i => (
-                    <option key={i.id} value={i.id} className="bg-gray-900">
-                      {i.name}
-                    </option>
-                  ))}
-                </optgroup>
+                <button
+                  key={g}
+                  role="tab"
+                  aria-selected={ind.group === g}
+                  title={g}
+                  onClick={() => ind.group !== g && changeIndicator(INDICATORS.find(i => i.group === g)!.id)}
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${
+                    ind.group === g ? "bg-emerald-500 text-white shadow" : "text-white/70 hover:text-white"
+                  }`}
+                >
+                  {GROUP_ICONS[g]}
+                  {GROUP_SHORT[g] ?? g}
+                </button>
               ))}
-            </select>
-          </label>
-        </div>
-      </header>
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto min-w-0 [scrollbar-width:none]">
+              {INDICATORS.filter(i => i.group === ind.group).map(i => (
+                <button
+                  key={i.id}
+                  aria-pressed={i.id === ind.id}
+                  onClick={() => changeIndicator(i.id)}
+                  title={i.name}
+                  className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap border transition-colors ${
+                    i.id === ind.id
+                      ? "bg-white text-gray-900 border-white font-medium"
+                      : "border-white/20 text-white/75 hover:text-white hover:border-white/50"
+                  }`}
+                >
+                  {i.short}
+                </button>
+              ))}
+            </div>
+          </nav>
+        </header>
 
       {/* Panel lateral */}
       <aside
-        className={`absolute z-20 left-3 top-[124px] w-[min(340px,calc(100vw-72px))] rounded-2xl bg-black/50 backdrop-blur-md border border-white/10 p-4 ${
-          panelOpen || selected ? "max-h-[calc(100dvh-300px)] overflow-y-auto" : "max-h-[52px] overflow-hidden"
+        className={`pointer-events-auto w-[min(340px,100%)] min-h-0 rounded-2xl bg-black/50 backdrop-blur-md border border-white/10 p-4 ${
+          panelOpen || selected ? "overflow-y-auto" : "h-[52px] shrink-0 overflow-hidden"
         }`}
       >
         {selected ? (
@@ -362,6 +506,7 @@ export default function AtlasApp() {
                     )}
                   </Stat>
                 </div>
+                <AreaLine ind={ind} iso3={selected.iso3} from={from} year={year} />
                 <TrendChart
                   indicator={ind}
                   year={year}
@@ -403,40 +548,7 @@ export default function AtlasApp() {
             {/* Ficha con todos los indicadores del país */}
             <div>
               <div className="text-xs font-medium text-white/80 mb-1">Ficha ambiental</div>
-              <ul className="text-xs divide-y divide-white/5">
-                {INDICATORS.map(i => {
-                  const y = i.id === ind.id ? year : i.yearLabels ? defaultYear(i) : nearestYear(i, Math.min(year, defaultYear(i)))
-                  const s = i.values[selected.iso3]
-                  const v = valueAt(i, s, y)
-                  const d = changeBetween(i, s, i.years[0], y)
-                  return (
-                    <li key={i.id}>
-                      <button
-                        onClick={() => changeIndicator(i.id)}
-                        className={`w-full flex items-center justify-between gap-2 py-1 px-1 -mx-1 rounded text-left hover:bg-white/10 ${
-                          i.id === ind.id ? "bg-white/5" : ""
-                        }`}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-white/80">{i.short}</span>
-                          <span className="block text-[10px] text-white/40">
-                            {yearLabel(i, y)}
-                            {isProjected(i, y) && " · proyección"}
-                          </span>
-                        </span>
-                        <span className="text-right whitespace-nowrap tabular-nums">
-                          <span className="block text-white">{fmtValue(i, v)}</span>
-                          {d !== null && y !== i.years[0] && (
-                            <span className={`block text-[10px] ${changeTone(i, d) || "text-white/40"}`}>
-                              {fmtChange(i, d)} desde {yearLabel(i, i.years[0]).slice(0, 4)}
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
+              <FichaRows iso3={selected.iso3} active={ind} year={year} onPick={changeIndicator} />
             </div>
           </div>
         ) : (
@@ -485,6 +597,28 @@ export default function AtlasApp() {
                   </>
                 )}
               </Stat>
+            </div>
+            {ind.worldArea && (
+              <div className="text-[11px] text-white/70 leading-snug">
+                Bosque mundial:{" "}
+                <span className="text-white tabular-nums">{fmtArea(valueAt(ind, ind.worldArea, year))}</span>
+                {from !== year &&
+                  (() => {
+                    const d = changeBetween(ind, ind.worldArea, from, year)
+                    return d === null ? null : (
+                      <>
+                        {" · "}
+                        <span className={`tabular-nums ${d < 0 ? "text-red-300" : "text-emerald-300"}`}>
+                          {d < 0 ? "perdió" : "ganó"} {fmtArea(Math.abs(d))}
+                        </span>{" "}
+                        desde {yearLabel(ind, from)}
+                      </>
+                    )
+                  })()}
+              </div>
+            )}
+            <div className="sm:hidden">
+              <Legend ind={ind} mode={mode} year={year} baseYear={baseYear} />
             </div>
             {ind.world && (
               <TrendChart
@@ -551,6 +685,7 @@ export default function AtlasApp() {
           </div>
         )}
       </aside>
+      </div>
 
       {/* Leyenda + capas */}
       <div className="absolute z-20 right-3 bottom-[132px] sm:bottom-[104px] rounded-2xl bg-black/50 backdrop-blur-md border border-white/10 p-3 space-y-3 hidden sm:block">

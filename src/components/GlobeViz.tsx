@@ -19,6 +19,7 @@ interface GlobeVizProps {
 
 const SOURCE = "countries"
 const FILL = "countries-fill"
+const HEX = "countries-hex"
 const LINE = "countries-line"
 const HOVER = "countries-hover"
 const SELECTED = "countries-selected"
@@ -27,6 +28,52 @@ function fillExpression(colors: Record<string, string>): ExpressionSpecification
   const entries = Object.entries(colors)
   if (!entries.length) return NO_DATA_COLOR
   return ["match", ["get", "iso3"], ...entries.flat(), NO_DATA_COLOR] as unknown as ExpressionSpecification
+}
+
+/**
+ * Tesela repetible con celdas hexagonales (panal). Se usa como patrón de relleno
+ * recortado por el contorno de cada país.
+ */
+function honeycombTile(pixelRatio = 2) {
+  const r = 7 // radio del hexágono en px CSS
+  const w = Math.round(Math.sqrt(3) * r)
+  const h = 3 * r
+  const canvas = document.createElement("canvas")
+  canvas.width = w * pixelRatio
+  canvas.height = h * pixelRatio
+  const ctx = canvas.getContext("2d")!
+  ctx.scale(pixelRatio, pixelRatio)
+  const hexagon = (cx: number, cy: number, radius: number) => {
+    ctx.beginPath()
+    for (let k = 0; k < 6; k++) {
+      const a = (Math.PI / 3) * k + Math.PI / 6
+      const x = cx + ((radius * Math.cos(a)) / (Math.sqrt(3) * r / 2)) * (w / 2)
+      const y = cy + radius * Math.sin(a)
+      if (k === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.closePath()
+  }
+  const centers: [number, number][] = [
+    [0, 0],
+    [w, 0],
+    [w / 2, 1.5 * r],
+    [0, 3 * r],
+    [w, 3 * r],
+  ]
+  for (const [cx, cy] of centers) {
+    // Borde oscuro de la celda y un brillo interior para dar relieve
+    hexagon(cx, cy, r)
+    ctx.strokeStyle = "rgba(4, 18, 28, 0.55)"
+    ctx.lineWidth = 1.3
+    ctx.stroke()
+    hexagon(cx, cy, r - 1.6)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.16)"
+    ctx.lineWidth = 0.7
+    ctx.stroke()
+  }
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  return { width: canvas.width, height: canvas.height, data: new Uint8Array(data.data.buffer), pixelRatio }
 }
 
 // Con mapa base, el relleno deja ver un poco las teselas
@@ -162,11 +209,19 @@ const GlobeViz = ({ colors, basemap, selectedIso, onSelect, onHover }: GlobeVizP
           "fill-opacity": fillOpacity(propsRef.current.basemap),
         },
       })
+      const tile = honeycombTile()
+      map.addImage("honeycomb", { width: tile.width, height: tile.height, data: tile.data }, { pixelRatio: tile.pixelRatio })
+      map.addLayer({
+        id: HEX,
+        type: "fill",
+        source: SOURCE,
+        paint: { "fill-pattern": "honeycomb", "fill-opacity": 0.75 },
+      })
       map.addLayer({
         id: LINE,
         type: "line",
         source: SOURCE,
-        paint: { "line-color": "rgba(10,20,30,0.55)", "line-width": 0.5 },
+        paint: { "line-color": "rgba(4,18,28,0.9)", "line-width": ["interpolate", ["linear"], ["zoom"], 1, 0.8, 5, 1.6] },
       })
       map.addLayer({
         id: HOVER,
